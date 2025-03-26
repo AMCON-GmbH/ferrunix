@@ -59,6 +59,7 @@ pub(crate) fn derive_macro_impl(
         }
     };
 
+    #[cfg(feature = "override")]
     let expanded = quote! {
         #[automatically_derived]
         impl #struct_name {
@@ -70,6 +71,19 @@ pub(crate) fn derive_macro_impl(
             #[allow(clippy::use_self, dead_code)]
             #sig_override {
                 #boxed_registration_override
+            }
+        }
+
+        #autoregistration
+    };
+
+    #[cfg(not(feature = "override"))]
+    let expanded = quote! {
+        #[automatically_derived]
+        impl #struct_name {
+            #[allow(clippy::use_self, dead_code)]
+            #sig {
+                #boxed_registration
             }
         }
 

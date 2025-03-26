@@ -21,6 +21,7 @@ default = []
 multithread = ["once_cell/parking_lot"]
 tokio = ["dep:tokio", "dep:async-trait"]
 tracing = ["dep:tracing"]
+override = []
 
 [dependencies]
 once_cell = { version = "~1.20" }

@@ -9,5 +9,5 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
-ferrunix.workspace = true
+ferrunix = { workspace = true, features = ["override"] }
 thiserror = "1"

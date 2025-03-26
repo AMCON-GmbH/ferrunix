@@ -24,6 +24,7 @@ default = ["development"]
 multithread = []
 tokio = []
 development = ["syn/extra-traits", "dep:prettyplease"]
+override = []
 
 [dependencies]
 syn = { version = "2", features = ["extra-traits"] }

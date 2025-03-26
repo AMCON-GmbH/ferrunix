@@ -22,6 +22,7 @@ multithread = ["ferrunix-core/multithread"]
 derive = ["dep:ferrunix-macros"]
 tokio = ["ferrunix-core/tokio", "ferrunix-macros?/tokio"]
 tracing = ["ferrunix-core/tracing"]
+override = ["ferrunix-core/override", "ferrunix-macros?/override"]
 
 [dependencies]
 ferrunix-core = { path = "../ferrunix-core", default-features = false, version = "=0.3.4" }

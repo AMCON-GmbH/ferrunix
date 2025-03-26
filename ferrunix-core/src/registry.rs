@@ -176,6 +176,7 @@ impl Registry {
     /// # Parameters
     ///   * `ctor`: A constructor function returning the newly constructed `T`.
     ///     This constructor will be called for every `T` that is requested.
+    #[cfg(feature = "override")]
     #[cfg_attr(feature = "tracing", tracing::instrument(skip(ctor)))]
     pub fn transient_override<T>(&self, ctor: fn() -> T)
     where
@@ -239,6 +240,7 @@ impl Registry {
     ///   * `ctor`: A constructor function returning the newly constructed `T`.
     ///     This constructor will be called once, lazily, when the first
     ///     instance of `T` is requested.
+    #[cfg(feature = "override")]
     #[cfg_attr(feature = "tracing", tracing::instrument(skip(ctor)))]
     pub fn singleton_override<T, F>(&self, ctor: F)
     where
@@ -370,6 +372,7 @@ impl Registry {
     ///
     /// This acquires an exclusive lock on `self.objects`.
     #[inline]
+    #[cfg(feature = "override")]
     fn insert_or_override<T: 'static>(&self, value: Object) {
         let mut lock = self.objects.write();
         let entry = lock.entry(TypeId::of::<T>());
@@ -463,6 +466,7 @@ impl Registry {
     ///   * `ctor`: A constructor function returning the newly constructed `T`.
     ///     This constructor will be called once, lazily, when the first
     ///     instance of `T` is requested.
+    #[cfg(feature = "override")]
     #[cfg_attr(feature = "tracing", tracing::instrument(skip(ctor)))]
     pub async fn singleton_override<T, F>(&self, ctor: F)
     where
@@ -529,6 +533,7 @@ impl Registry {
     /// # Parameters
     ///   * `ctor`: A constructor function returning the newly constructed `T`.
     ///     This constructor will be called for every `T` that is requested.
+    #[cfg(feature = "override")]
     #[cfg_attr(feature = "tracing", tracing::instrument(skip(ctor)))]
     pub async fn transient_override<T>(
         &self,
@@ -656,6 +661,7 @@ impl Registry {
     ///
     /// This acquires an exclusive lock on `self.objects`.
     #[inline]
+    #[cfg(feature = "override")]
     async fn insert_or_override<T: 'static>(&self, value: Object) {
         let mut lock = self.objects.write().await;
         let entry = lock.entry(TypeId::of::<T>());
@@ -763,7 +769,7 @@ where
     ///
     /// For single dependencies, the destructured tuple needs to end with a
     /// comma: `(dep,)`.
-    #[cfg(not(feature = "tokio"))]
+    #[cfg(all(not(feature = "tokio"), feature = "override"))]
     #[cfg_attr(feature = "tracing", tracing::instrument(skip(ctor)))]
     pub fn transient_override(&self, ctor: fn(Deps) -> T) {
         use crate::object_builder::TransientBuilderImplWithDeps;
@@ -831,7 +837,7 @@ where
     /// This constructor will be called for every `T` that is requested.
     ///
     /// The `ctor` must return a boxed `dyn Future`.
-    #[cfg(feature = "tokio")]
+    #[cfg(all(feature = "tokio", feature = "override"))]
     #[cfg_attr(feature = "tracing", tracing::instrument(skip(ctor)))]
     pub async fn transient_override(
         &self,
@@ -941,7 +947,7 @@ where
     ///
     /// For single dependencies, the destructured tuple needs to end with a
     /// comma: `(dep,)`.
-    #[cfg(not(feature = "tokio"))]
+    #[cfg(all(not(feature = "tokio"), feature = "override"))]
     #[cfg_attr(feature = "tracing", tracing::instrument(skip(ctor)))]
     pub fn singleton_override<F>(&self, ctor: F)
     where
@@ -1005,7 +1011,7 @@ where
     /// instance of `T` is requested.
     ///
     /// The `ctor` must return a boxed `dyn Future`.
-    #[cfg(feature = "tokio")]
+    #[cfg(all(feature = "tokio", feature = "override"))]
     #[cfg_attr(feature = "tracing", tracing::instrument(skip(ctor)))]
     pub async fn singleton_override<F>(&self, ctor: F)
     where
