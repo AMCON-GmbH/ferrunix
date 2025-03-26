@@ -167,6 +167,35 @@ impl Registry {
         self.validator.add_transient_no_deps::<T>();
     }
 
+    /// Register a new transient object or override an existing object with this transient object,
+    /// without dependencies.
+    ///
+    /// To register a type with dependencies, use the builder returned from
+    /// [`Registry::with_deps`].
+    ///
+    /// # Parameters
+    ///   * `ctor`: A constructor function returning the newly constructed `T`.
+    ///     This constructor will be called for every `T` that is requested.
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip(ctor)))]
+    pub fn transient_override<T>(&self, ctor: fn() -> T)
+    where
+        T: Registerable,
+    {
+        use crate::object_builder::TransientBuilderImplNoDeps;
+
+        #[cfg(feature = "tracing")]
+        tracing::info!(
+            "registering transient ({})",
+            std::any::type_name::<T>()
+        );
+
+        let transient =
+            Object::Transient(Box::new(TransientBuilderImplNoDeps::new(ctor)));
+
+        self.insert_or_override::<T>(transient);
+        self.validator.add_transient_no_deps::<T>();
+    }
+
     /// Register a new singleton object, without dependencies.
     ///
     /// To register a type with dependencies, use the builder returned from
@@ -197,6 +226,37 @@ impl Registry {
             Object::Singleton(Box::new(SingletonGetterNoDeps::new(ctor)));
 
         self.insert_or_panic::<T>(singleton);
+        self.validator.add_singleton_no_deps::<T>();
+    }
+
+    /// Register a new singleton object or override an existing object with this singleton object,
+    /// without dependencies.
+    ///
+    /// To register a type with dependencies, use the builder returned from
+    /// [`Registry::with_deps`].
+    ///
+    /// # Parameters
+    ///   * `ctor`: A constructor function returning the newly constructed `T`.
+    ///     This constructor will be called once, lazily, when the first
+    ///     instance of `T` is requested.
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip(ctor)))]
+    pub fn singleton_override<T, F>(&self, ctor: F)
+    where
+        T: RegisterableSingleton,
+        F: SingletonCtor<T>,
+    {
+        use crate::object_builder::SingletonGetterNoDeps;
+
+        #[cfg(feature = "tracing")]
+        tracing::info!(
+            "registering singleton ({})",
+            std::any::type_name::<T>()
+        );
+
+        let singleton =
+            Object::Singleton(Box::new(SingletonGetterNoDeps::new(ctor)));
+
+        self.insert_or_override::<T>(singleton);
         self.validator.add_singleton_no_deps::<T>();
     }
 
@@ -283,7 +343,7 @@ impl Registry {
         registry
     }
 
-    /// Inserts a new object into the objecs hashtable.
+    /// Inserts a new object into the objects hashtable.
     ///
     /// This acquires an exclusive lock on `self.objects`.
     ///
@@ -304,6 +364,16 @@ impl Registry {
                 view.insert(value);
             }
         }
+    }
+
+    /// Inserts a new object into the objects hashtable or overrides the existing object.
+    ///
+    /// This acquires an exclusive lock on `self.objects`.
+    #[inline]
+    fn insert_or_override<T: 'static>(&self, value: Object) {
+        let mut lock = self.objects.write();
+        let entry = lock.entry(TypeId::of::<T>());
+        entry.insert(value);
     }
 }
 
@@ -383,6 +453,37 @@ impl Registry {
         self.validator.add_singleton_no_deps::<T>();
     }
 
+    /// Register a new singleton object or override an existing object with this singleton object,
+    /// without dependencies.
+    ///
+    /// To register a type with dependencies, use the builder returned from
+    /// [`Registry::with_deps`].
+    ///
+    /// # Parameters
+    ///   * `ctor`: A constructor function returning the newly constructed `T`.
+    ///     This constructor will be called once, lazily, when the first
+    ///     instance of `T` is requested.
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip(ctor)))]
+    pub async fn singleton_override<T, F>(&self, ctor: F)
+    where
+        T: RegisterableSingleton,
+        F: SingletonCtor<T>,
+    {
+        use crate::object_builder::AsyncSingletonNoDeps;
+
+        #[cfg(feature = "tracing")]
+        tracing::info!(
+            "registering singleton ({})",
+            std::any::type_name::<T>()
+        );
+
+        let singleton =
+            Object::AsyncSingleton(Box::new(AsyncSingletonNoDeps::new(ctor)));
+
+        self.insert_or_override::<T>(singleton).await;
+        self.validator.add_singleton_no_deps::<T>();
+    }
+
     /// Register a new transient object, without dependencies.
     ///
     /// To register a type with dependencies, use the builder returned from
@@ -416,6 +517,40 @@ impl Registry {
         ));
 
         self.insert_or_panic::<T>(transient).await;
+        self.validator.add_transient_no_deps::<T>();
+    }
+
+    /// Register a new transient object or override an existing object with this transient object,
+    /// without dependencies.
+    ///
+    /// To register a type with dependencies, use the builder returned from
+    /// [`Registry::with_deps`].
+    ///
+    /// # Parameters
+    ///   * `ctor`: A constructor function returning the newly constructed `T`.
+    ///     This constructor will be called for every `T` that is requested.
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip(ctor)))]
+    pub async fn transient_override<T>(
+        &self,
+        ctor: fn() -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = T> + Send>,
+        >,
+    ) where
+        T: Registerable,
+    {
+        use crate::object_builder::AsyncTransientBuilderImplNoDeps;
+
+        #[cfg(feature = "tracing")]
+        tracing::info!(
+            "registering transient ({})",
+            std::any::type_name::<T>()
+        );
+
+        let transient = Object::AsyncTransient(Box::new(
+            AsyncTransientBuilderImplNoDeps::new(ctor),
+        ));
+
+        self.insert_or_override::<T>(transient).await;
         self.validator.add_transient_no_deps::<T>();
     }
 
@@ -506,7 +641,7 @@ impl Registry {
         let entry = lock.entry(TypeId::of::<T>());
         match entry {
             #[allow(clippy::panic)]
-            hashbrown::hash_map::Entry::Occupied(_) => panic!(
+            hashbrown::hash_map::Entry::Occupied(e) => panic!(
                 "Type '{}' ({:?}) is already registered",
                 std::any::type_name::<T>(),
                 TypeId::of::<T>()
@@ -515,6 +650,16 @@ impl Registry {
                 view.insert(value);
             }
         }
+    }
+
+    /// Inserts a new object into the objects hashtable or overrides the existing object.
+    ///
+    /// This acquires an exclusive lock on `self.objects`.
+    #[inline]
+    async fn insert_or_override<T: 'static>(&self, value: Object) {
+        let mut lock = self.objects.write().await;
+        let entry = lock.entry(TypeId::of::<T>());
+        entry.insert(value);
     }
 }
 
@@ -592,6 +737,51 @@ where
         self.registry.validator.add_transient_deps::<T, Deps>();
     }
 
+    /// Register a new transient object or override an existing object with this transient object,
+    /// with dependencies specified in `.with_deps`.
+    ///
+    /// The `ctor` parameter is a constructor function returning the newly
+    /// constructed `T`. The constructor accepts a single argument `Deps` (a
+    /// tuple implementing [`crate::dependency_builder::DepBuilder`]). It's
+    /// best to destructure the tuple to accept each dependency separately.
+    /// This constructor will be called for every `T` that is requested.
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// # use ferrunix_core::{Registry, Singleton, Transient};
+    /// # let registry = Registry::empty();
+    /// # struct Template {
+    /// #     template: &'static str,
+    /// # }
+    /// registry
+    ///     .with_deps::<_, (Transient<u8>, Singleton<Template>)>()
+    ///     .transient_override(|(num, template)| {
+    ///         // access `num` and `template` here.
+    ///         u16::from(*num)
+    ///     });
+    /// ```
+    ///
+    /// For single dependencies, the destructured tuple needs to end with a
+    /// comma: `(dep,)`.
+    #[cfg(not(feature = "tokio"))]
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip(ctor)))]
+    pub fn transient_override(&self, ctor: fn(Deps) -> T) {
+        use crate::object_builder::TransientBuilderImplWithDeps;
+
+        #[cfg(feature = "tracing")]
+        tracing::info!(
+            "registering transient (with dependencies) ({})",
+            std::any::type_name::<T>()
+        );
+
+        let transient = Object::Transient(Box::new(
+            TransientBuilderImplWithDeps::new(ctor),
+        ));
+
+        self.registry.insert_or_override::<T>(transient);
+        self.registry.validator.add_transient_deps::<T, Deps>();
+    }
+
     /// Register a new transient object, with dependencies specified in
     /// `.with_deps`.
     ///
@@ -630,6 +820,42 @@ where
         self.registry.insert_or_panic::<T>(transient).await;
         self.registry.validator.add_transient_deps::<T, Deps>();
     }
+
+    /// Register a new transient object or override an existing object with this transient object,
+    /// with dependencies specified in `.with_deps`.
+    ///
+    /// The `ctor` parameter is a constructor function returning the newly
+    /// constructed `T`. The constructor accepts a single argument `Deps` (a
+    /// tuple implementing [`crate::dependency_builder::DepBuilder`]). It's
+    /// best to destructure the tuple to accept each dependency separately.
+    /// This constructor will be called for every `T` that is requested.
+    ///
+    /// The `ctor` must return a boxed `dyn Future`.
+    #[cfg(feature = "tokio")]
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip(ctor)))]
+    pub async fn transient_override(
+        &self,
+        ctor: fn(
+            Deps,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = T> + Send>,
+        >,
+    ) {
+        use crate::object_builder::AsyncTransientBuilderImplWithDeps;
+
+        #[cfg(feature = "tracing")]
+        tracing::info!(
+            "registering transient (with dependencies) ({})",
+            std::any::type_name::<T>()
+        );
+
+        let transient = Object::AsyncTransient(Box::new(
+            AsyncTransientBuilderImplWithDeps::new(ctor),
+        ));
+
+        self.registry.insert_or_override::<T>(transient).await;
+        self.registry.validator.add_transient_deps::<T, Deps>();
+    }
 }
 
 impl<
@@ -659,7 +885,7 @@ where
     /// # }
     /// registry
     ///     .with_deps::<_, (Transient<u8>, Singleton<Template>)>()
-    ///     .transient(|(num, template)| {
+    ///     .singleton(|(num, template)| {
     ///         // access `num` and `template` here.
     ///         u16::from(*num)
     ///     });
@@ -685,6 +911,54 @@ where
             Object::Singleton(Box::new(SingletonGetterWithDeps::new(ctor)));
 
         self.registry.insert_or_panic::<T>(singleton);
+        self.registry.validator.add_singleton_deps::<T, Deps>();
+    }
+
+    /// Register a new singleton object or override an existing object with this transient object,
+    /// with dependencies specified in `.with_deps`.
+    ///
+    /// The `ctor` parameter is a constructor function returning the newly
+    /// constructed `T`. The constructor accepts a single argument `Deps` (a
+    /// tuple implementing [`crate::dependency_builder::DepBuilder`]). It's
+    /// best to destructure the tuple to accept each dependency separately.
+    /// This constructor will be called once, lazily, when the first
+    /// instance of `T` is requested.
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// # use ferrunix_core::{Registry, Singleton, Transient};
+    /// # let registry = Registry::empty();
+    /// # struct Template {
+    /// #     template: &'static str,
+    /// # }
+    /// registry
+    ///     .with_deps::<_, (Transient<u8>, Singleton<Template>)>()
+    ///     .singleton_override(|(num, template)| {
+    ///         // access `num` and `template` here.
+    ///         u16::from(*num)
+    ///     });
+    /// ```
+    ///
+    /// For single dependencies, the destructured tuple needs to end with a
+    /// comma: `(dep,)`.
+    #[cfg(not(feature = "tokio"))]
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip(ctor)))]
+    pub fn singleton_override<F>(&self, ctor: F)
+    where
+        F: SingletonCtorDeps<T, Deps>,
+    {
+        use crate::object_builder::SingletonGetterWithDeps;
+
+        #[cfg(feature = "tracing")]
+        tracing::info!(
+            "registering singleton (with dependencies) ({})",
+            std::any::type_name::<T>()
+        );
+
+        let singleton =
+            Object::Singleton(Box::new(SingletonGetterWithDeps::new(ctor)));
+
+        self.registry.insert_or_override::<T>(singleton);
         self.registry.validator.add_singleton_deps::<T, Deps>();
     }
 
@@ -717,6 +991,38 @@ where
             Object::AsyncSingleton(Box::new(AsyncSingletonWithDeps::new(ctor)));
 
         self.registry.insert_or_panic::<T>(singleton).await;
+        self.registry.validator.add_singleton_deps::<T, Deps>();
+    }
+
+    /// Register a new singleton object or override an existing object with this transient object,
+    /// with dependencies specified in `.with_deps`.
+    ///
+    /// The `ctor` parameter is a constructor function returning the newly
+    /// constructed `T`. The constructor accepts a single argument `Deps` (a
+    /// tuple implementing [`crate::dependency_builder::DepBuilder`]). It's
+    /// best to destructure the tuple to accept each dependency separately.
+    /// This constructor will be called once, lazily, when the first
+    /// instance of `T` is requested.
+    ///
+    /// The `ctor` must return a boxed `dyn Future`.
+    #[cfg(feature = "tokio")]
+    #[cfg_attr(feature = "tracing", tracing::instrument(skip(ctor)))]
+    pub async fn singleton_override<F>(&self, ctor: F)
+    where
+        F: SingletonCtorDeps<T, Deps>,
+    {
+        use crate::object_builder::AsyncSingletonWithDeps;
+
+        #[cfg(feature = "tracing")]
+        tracing::info!(
+            "registering singleton (with dependencies) ({})",
+            std::any::type_name::<T>()
+        );
+
+        let singleton =
+            Object::AsyncSingleton(Box::new(AsyncSingletonWithDeps::new(ctor)));
+
+        self.registry.insert_or_override::<T>(singleton).await;
         self.registry.validator.add_singleton_deps::<T, Deps>();
     }
 }

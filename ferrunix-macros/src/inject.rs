@@ -12,15 +12,24 @@ use crate::utils::get_ctor_for;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DependencyType {
-    Singleton,
-    Transient,
+    Singleton(OverrideType),
+    Transient(OverrideType),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OverrideType {
+    NonOverride,
+    Override,
 }
 
 impl ToTokens for DependencyType {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         match self {
-            Self::Singleton => tokens.append(format_ident!("singleton")),
-            Self::Transient => tokens.append(format_ident!("transient")),
+            Self::Singleton(OverrideType::NonOverride) => tokens.append(format_ident!("singleton")),
+            Self::Transient(OverrideType::NonOverride) => tokens.append(format_ident!("transient")),
+            Self::Singleton(OverrideType::Override) => tokens.append(format_ident!("singleton_override")),
+            Self::Transient(OverrideType::Override) => tokens.append(format_ident!("transient_override")),
+
         }
     }
 }
@@ -31,9 +40,12 @@ pub(crate) fn derive_macro_impl(
 ) -> syn::Result<proc_macro2::TokenStream> {
     let struct_name = &input.ident;
 
-    let registration = registration(input, attrs)?;
+    let registration_override = registration(input, attrs, OverrideType::Override)?;
+    let registration = registration(input, attrs, OverrideType::NonOverride)?;
     let sig = register_func_sig();
+    let sig_override = register_override_func_sig();
     let boxed_registration = box_if_required(&registration);
+    let boxed_registration_override = box_if_required(&registration_override);
 
     let autoregistration = {
         if attrs.no_registration() {
@@ -54,6 +66,11 @@ pub(crate) fn derive_macro_impl(
             #sig {
                 #boxed_registration
             }
+
+            #[allow(clippy::use_self, dead_code)]
+            #sig_override {
+                #boxed_registration_override
+            }
         }
 
         #autoregistration
@@ -69,6 +86,22 @@ fn register_func_sig() -> proc_macro2::TokenStream {
     #[cfg(feature = "tokio")]
     quote! {
         pub(crate) fn register<'reg>(
+            registry: &'reg ::ferrunix::Registry,
+        ) -> ::std::pin::Pin<
+            ::std::boxed::Box<dyn ::std::future::Future<Output = ()> + Send + 'reg>,
+        >
+        where
+            Self: Sync + 'static,
+    }
+}
+
+fn register_override_func_sig() -> proc_macro2::TokenStream {
+    #[cfg(not(feature = "tokio"))]
+    quote! { pub(crate) fn register_override(registry: &::ferrunix::Registry) }
+
+    #[cfg(feature = "tokio")]
+    quote! {
+        pub(crate) fn register_override<'reg>(
             registry: &'reg ::ferrunix::Registry,
         ) -> ::std::pin::Pin<
             ::std::boxed::Box<dyn ::std::future::Future<Output = ()> + Send + 'reg>,
@@ -123,11 +156,12 @@ fn await_if_needed() -> Option<proc_macro2::TokenStream> {
 fn registration(
     input: &DeriveInput,
     attrs: &DeriveAttrInput,
+    override_type: OverrideType,
 ) -> syn::Result<proc_macro2::TokenStream> {
     if attrs.transient().is_some() {
-        registration_transient(input, attrs)
+        registration_transient(input, attrs,override_type)
     } else if attrs.singleton().is_some() {
-        registration_singleton(input, attrs)
+        registration_singleton(input, attrs,override_type)
     } else {
         // eprintln!("input: {input:#?}");
         // eprintln!("attrs: {attrs:#?}");
@@ -141,16 +175,17 @@ fn registration(
 fn registration_transient(
     input: &DeriveInput,
     attrs: &DeriveAttrInput,
+    override_type: OverrideType,
 ) -> syn::Result<proc_macro2::TokenStream> {
     let fields_is_empty = attrs.fields().is_empty();
     let registered_ty = attrs.transient().expect("transient attribute");
     // eprintln!("registered_ty: {registered_ty:#?}");
 
     if fields_is_empty {
-        registration_empty(DependencyType::Transient, &registered_ty)
+        registration_empty(DependencyType::Transient(override_type), &registered_ty)
     } else {
         registration_fields(
-            DependencyType::Transient,
+            DependencyType::Transient(override_type),
             &registered_ty,
             input,
             attrs,
@@ -167,8 +202,8 @@ fn registration_empty(
     let ifawait = await_if_needed();
     let generic_args = {
         match dependency_type {
-            DependencyType::Singleton => quote! { <#registered_ty, _> },
-            DependencyType::Transient => quote! { <#registered_ty> },
+            DependencyType::Singleton(_) => quote! { <#registered_ty, _> },
+            DependencyType::Transient(_) => quote! { <#registered_ty> },
         }
     };
 
@@ -197,8 +232,8 @@ fn registration_fields(
     let ifawait = await_if_needed();
     let generic_args = {
         match dependency_type {
-            DependencyType::Singleton => quote! { <#registered_ty, _> },
-            DependencyType::Transient => quote! { <#registered_ty> },
+            DependencyType::Singleton(_) => quote! { <#registered_ty, _> },
+            DependencyType::Transient(_) => quote! { <#registered_ty> },
         }
     };
 
@@ -384,15 +419,16 @@ fn field_ctor_rhs(
 fn registration_singleton(
     input: &DeriveInput,
     attrs: &DeriveAttrInput,
+    override_type: OverrideType,
 ) -> syn::Result<proc_macro2::TokenStream> {
     let fields_is_empty = attrs.fields().is_empty();
     let registered_ty = attrs.singleton().expect("singleton attribute");
 
     if fields_is_empty {
-        registration_empty(DependencyType::Singleton, &registered_ty)
+        registration_empty(DependencyType::Singleton(override_type), &registered_ty)
     } else {
         registration_fields(
-            DependencyType::Singleton,
+            DependencyType::Singleton(override_type),
             &registered_ty,
             input,
             attrs,
