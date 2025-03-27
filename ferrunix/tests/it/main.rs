@@ -8,13 +8,15 @@ mod validate_traits;
 #[cfg(all(feature = "derive", feature = "tokio"))]
 mod derive_async;
 #[cfg(feature = "derive")]
+mod derive_ctor;
+#[cfg(feature = "derive")]
 mod derive_registration;
 #[cfg(feature = "derive")]
 mod derive_regression;
-#[cfg(feature = "derive")]
-mod derive_ctor;
 #[cfg(all(feature = "derive", not(feature = "tokio")))]
 mod derive_simple;
+#[cfg(all(feature = "derive", not(feature = "tokio")))]
+mod derive_singleton;
 
 #[cfg(not(feature = "tokio"))]
 mod manual;
