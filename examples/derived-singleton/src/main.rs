@@ -2,8 +2,10 @@
 //!
 //! This example is inspired by the Guice example.
 
+use std::cell::RefCell;
 use std::error::Error;
-
+use std::ops::Deref;
+use std::sync::RwLock;
 use ferrunix::{Inject, Registry, Ref};
 
 use self::traits::{
@@ -15,7 +17,7 @@ mod traits;
 
 /// An implementation of a credit card processr for PayPal.
 #[derive(Debug, Default, Inject)]
-#[provides(singleton = "dyn CreditCardProcessor")]
+#[provides(singleton = "dyn CreditCardProcessor", no_registration)]
 pub struct PaypalCreditCardProcessor {}
 
 impl CreditCardProcessor for PaypalCreditCardProcessor {
@@ -49,9 +51,9 @@ impl TransactionLog for RealTransactionLog {
 #[provides(singleton = "dyn BillingService")]
 pub struct RealBillingService {
     #[inject(singleton)]
-    creditcard_processor: Ref<dyn CreditCardProcessor + 'static>,
+    creditcard_processor: Ref<RwLock<Box<dyn CreditCardProcessor>>>,
     #[inject(singleton)]
-    transactionlog: Ref<dyn TransactionLog + 'static>,
+    transactionlog: Ref<Box<dyn TransactionLog>>,
 }
 
 impl BillingService for RealBillingService {
@@ -60,7 +62,7 @@ impl BillingService for RealBillingService {
         order: PizzaOrder,
         creditcard: &CreditCard,
     ) -> Result<Receipt, ExampleError> {
-        match self.creditcard_processor.charge(creditcard, order.0) {
+        match self.creditcard_processor.try_read().unwrap().charge(creditcard, order.0) {
             Ok(charged_amount) => {
                 self.transactionlog.log_charge(charged_amount);
                 Ok(Receipt(charged_amount))
@@ -75,10 +77,17 @@ impl BillingService for RealBillingService {
 
 fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     let registry = Registry::global();
+
+    registry.singleton(|| {
+        let inner: Box<dyn CreditCardProcessor> =
+            Box::new(PaypalCreditCardProcessor::default());
+        RwLock::new(inner)
+    });
+
     registry.validate_all_full()?;
 
     let billing_service =
-        registry.get_singleton::<Ref<dyn BillingService>>().unwrap();
+        registry.get_singleton::<Box<dyn BillingService>>().unwrap();
 
     let order = PizzaOrder(100);
     let creditcard = CreditCard {
