@@ -8,7 +8,7 @@ use syn::spanned::Spanned;
 use syn::{Data, DeriveInput};
 
 use crate::attr::{DeriveAttrInput, DeriveField};
-use crate::utils::get_ctor_for;
+use crate::utils::{get_ctor_for, strip_arc_rc_ref};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DependencyType {
@@ -193,7 +193,7 @@ fn registration_transient(
 ) -> syn::Result<proc_macro2::TokenStream> {
     let fields_is_empty = attrs.fields().is_empty();
     let registered_ty = attrs.transient().expect("transient attribute");
-    // eprintln!("registered_ty: {registered_ty:#?}");
+    // eprintln!("transient: registered ty => {}", quote!(#registered_ty));
 
     if fields_is_empty {
         registration_empty(DependencyType::Transient(override_type), &registered_ty)
@@ -207,6 +207,7 @@ fn registration_transient(
     }
 }
 
+/// Called to create a registration for types with no direct injected dependencies.
 fn registration_empty(
     dependency_type: DependencyType,
     registered_ty: &syn::Type,
@@ -230,6 +231,7 @@ fn registration_empty(
     Ok(tokens)
 }
 
+/// Called to create a registration for types with  direct injected dependencies.
 fn registration_fields(
     dependency_type: DependencyType,
     registered_ty: &syn::Type,
@@ -316,6 +318,7 @@ fn into_dependency_type(
     if field.is_transient() {
         Some(quote! { ::ferrunix::Transient<#ty> })
     } else if field.is_singleton() {
+        let ty = strip_arc_rc_ref(ty).ok()?;
         Some(quote! { ::ferrunix::Singleton<#ty> })
     } else {
         None
@@ -336,9 +339,12 @@ fn type_ctor(
         .collect::<syn::Result<Vec<_>>>()?;
     if let Some(ctor_name) = attrs.custom_ctor() {
         let ctor_name = ctor_name.as_ident();
-        let ctor = get_ctor_for(registered_ty, quote! {
-            Self::#ctor_name(#(#params),*)
-        });
+        let ctor = get_ctor_for(
+            registered_ty,
+            quote! {
+                Self::#ctor_name(#(#params),*)
+            },
+        );
         let ctor = ctor?;
 
         return Ok(ctor);
@@ -437,6 +443,7 @@ fn registration_singleton(
 ) -> syn::Result<proc_macro2::TokenStream> {
     let fields_is_empty = attrs.fields().is_empty();
     let registered_ty = attrs.singleton().expect("singleton attribute");
+    // eprintln!("singleton: registered ty => {}", quote!(#registered_ty));
 
     if fields_is_empty {
         registration_empty(DependencyType::Singleton(override_type), &registered_ty)
